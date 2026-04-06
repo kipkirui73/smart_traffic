@@ -1,0 +1,22 @@
+# Python bytecode (compiled files)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments (if you ever use venv)
+.venv/
+venv/
+env/
+
+# Large Data files (prevents that 92MB warning again)
+data/*.mp4
+data/*.avi
+data/*.mkv
+
+# Database files
+*.sqlite3
+*.db
+
+# Operating System junk
+Thumbs.db
+.DS_Store
