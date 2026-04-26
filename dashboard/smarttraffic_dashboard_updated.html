@@ -1,0 +1,117 @@
+
+<style>
+  .stv { font-family: 'Segoe UI', sans-serif; background: #0d0f14; color: #e2e6f0; border-radius: 12px; overflow: hidden; }
+  .stv-nav { background: #161a24; border-bottom: 1px solid #2a2e3d; padding: 0 1.2rem; height: 48px; display: flex; align-items: center; gap: 10px; }
+  .stv-logo { font-size: 14px; font-weight: 700; color: #4f8ef7; }
+  .stv-tag  { font-size: 11px; color: #6b7280; }
+  .stv-body { padding: 1.2rem; }
+  .stv-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 1.2rem; }
+  .stv-card { background: #161a24; border: 1px solid #2a2e3d; border-radius: 8px; padding: 0.9rem 1rem; }
+  .stv-card .lbl { font-size: 11px; color: #6b7280; margin-bottom: 4px; }
+  .stv-card .val { font-size: 24px; font-weight: 700; }
+  .blue  { color: #4f8ef7; }
+  .amber { color: #f4b942; }
+  .red   { color: #f7694f; }
+  .green { color: #34c78a; }
+  .stv-sec { font-size: 11px; font-weight: 600; color: #9ca3af; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; }
+  .stv-filters { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .stv-filters select, .stv-filters input { background: #161a24; border: 1px solid #2a2e3d; border-radius: 5px; color: #e2e6f0; padding: 5px 8px; font-size: 12px; }
+  .stv-filters button { background: #4f8ef7; color: #fff; border: none; border-radius: 5px; padding: 5px 14px; font-size: 12px; cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  thead th { background: #1e2230; color: #9ca3af; text-align: left; padding: 8px 10px; font-weight: 500; border-bottom: 1px solid #2a2e3d; }
+  tbody tr { border-bottom: 1px solid #1a1e2a; }
+  tbody tr:hover { background: #1c2030; }
+  tbody td { padding: 8px 10px; color: #d1d5db; }
+  .badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; }
+  .bs { background: #7c3aed22; color: #a78bfa; border: 1px solid #7c3aed55; }
+  .bw { background: #dc262622; color: #f87171; border: 1px solid #dc262655; }
+  .ev { color: #4f8ef7; font-size: 11px; cursor: pointer; text-decoration: underline; }
+</style>
+
+<div class="stv">
+  <div class="stv-nav">
+    <div class="stv-logo">SmartTraffic Vision</div>
+    <div class="stv-tag">AI-Powered Traffic Violation Detection</div>
+  </div>
+  <div class="stv-body">
+
+    <div class="stv-stats">
+      <div class="stv-card"><div class="lbl">Total Violations</div><div class="val blue">247</div></div>
+      <div class="stv-card"><div class="lbl">Signal Jumping</div><div class="val amber">158</div></div>
+      <div class="stv-card"><div class="lbl">Wrong-Way Driving</div><div class="val red">89</div></div>
+      <div class="stv-card"><div class="lbl">Active Cameras</div><div class="val green">6</div></div>
+    </div>
+
+    <div class="stv-sec">Violation Log</div>
+
+    <div class="stv-filters">
+      <select id="f-type" onchange="applyFilter()">
+        <option value="">All Types</option>
+        <option value="signal_jumping">Signal Jumping</option>
+        <option value="wrong_way_driving">Wrong-Way Driving</option>
+      </select>
+      <input type="date" id="f-start" value="2025-06-01" onchange="applyFilter()" />
+      <input type="date" id="f-end"   value="2025-06-30" onchange="applyFilter()" />
+      <button onclick="applyFilter()">Apply</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>Timestamp</th><th>Type</th><th>Vehicle ID</th><th>Camera ID</th><th>Location</th><th>Evidence</th>
+        </tr>
+      </thead>
+      <tbody id="sv-body"></tbody>
+    </table>
+
+  </div>
+</div>
+
+<script>
+const ALL_DATA = [
+  {id:1, ts:'2025-06-01 08:14:22', type:'signal_jumping',   vid:101, cam:3, loc:'Thika Rd / Roysambu', ev:true},
+  {id:2, ts:'2025-06-01 09:02:45', type:'wrong_way_driving',vid:102, cam:1, loc:'Mombasa Rd / Airport', ev:true},
+  {id:3, ts:'2025-06-02 11:33:10', type:'signal_jumping',   vid:103, cam:2, loc:'Ngong Rd / Prestige',  ev:true},
+  {id:4, ts:'2025-06-03 07:55:01', type:'wrong_way_driving',vid:104, cam:4, loc:'Uhuru Hwy / Globe',    ev:false},
+  {id:5, ts:'2025-06-04 14:22:38', type:'signal_jumping',   vid:105, cam:3, loc:'Thika Rd / Roysambu',  ev:true},
+  {id:6, ts:'2025-06-05 16:10:55', type:'signal_jumping',   vid:106, cam:5, loc:'Waiyaki Way / Westlands',ev:true},
+  {id:7, ts:'2025-06-06 08:44:19', type:'wrong_way_driving',vid:107, cam:2, loc:'Ngong Rd / Prestige',  ev:false},
+  {id:8, ts:'2025-06-07 10:05:30', type:'signal_jumping',   vid:108, cam:6, loc:'Lang\'ata Rd / Karen', ev:true},
+];
+
+function applyFilter() {
+  const type  = document.getElementById('f-type').value;
+  const start = document.getElementById('f-start').value;
+  const end   = document.getElementById('f-end').value;
+
+  let rows = ALL_DATA.filter(r => {
+    if (type && r.type !== type) return false;
+    if (start && r.ts < start)   return false;
+    if (end   && r.ts > end+' 99') return false;
+    return true;
+  });
+
+  const body = document.getElementById('sv-body');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#6b7280;padding:2rem;">No violations found.</td></tr>';
+    return;
+  }
+
+  body.innerHTML = rows.map(r => {
+    const bc  = r.type === 'signal_jumping' ? 'bs' : 'bw';
+    const lbl = r.type === 'signal_jumping' ? 'Signal Jumping' : 'Wrong-Way Driving';
+    const ev  = r.ev ? '<span class="ev">View</span>' : '<span style="color:#4b5563">—</span>';
+    return `<tr>
+      <td>${r.id}</td>
+      <td>${r.ts}</td>
+      <td><span class="badge ${bc}">${lbl}</span></td>
+      <td>#${r.vid}</td>
+      <td>Cam ${r.cam}</td>
+      <td>${r.loc}</td>
+      <td>${ev}</td>
+    </tr>`;
+  }).join('');
+}
+
+applyFilter();
+</script>
