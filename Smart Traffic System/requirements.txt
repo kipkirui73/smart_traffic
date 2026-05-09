@@ -1,0 +1,4 @@
+opencv-python>=4.8.0
+# Future modules will add these lines:
+# ultralytics          # for YOLO (Developer 2 later)
+# flask                # for dashboard (Developer 4)
