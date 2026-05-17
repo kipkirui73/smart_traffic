@@ -1,7 +1,10 @@
+import os
+
 # config.py - Shared settings (everyone imports from here)
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 # ================== VIDEO INPUT SETTINGS (Developer 1) ==================
-VIDEO_PATH = "data/traffic.mp4"
+VIDEO_PATH = os.path.join(BASE_DIR, "data", "traffic.mp4")
 USE_CAMERA = False          # Change to True later for live camera
 CAMERA_INDEX = 0            # 0 = default webcam
 
@@ -15,4 +18,4 @@ RETURN_RGB = False          # Set to True only if future YOLO needs RGB
 
 # ================== SHARED SETTINGS (other developers) ==================
 STOP_LINE_Y = 300
-DB_PATH = "traffic.db"
+DB_PATH = os.path.join(BASE_DIR, "traffic.db")
