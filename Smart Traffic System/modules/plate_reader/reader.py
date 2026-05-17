@@ -1,13 +1,9 @@
 # modules/plate_reader/reader.py
 """
-Number Plate Reader
-===================
-Extracts the region of a detected vehicle from a frame,
-then runs OCR (EasyOCR) to read the licence plate text.
-
-Usage example (in main.py):
-    from modules.plate_reader.reader import read_plate
-    plate_text = read_plate(frame, vehicle["box"])
+Number Plate Reader  —  UK format, Tesseract backend
+=====================================================
+Tested against traffic.mp4 (1920×1080, 30fps road footage).
+Reads UK current format plates: AB12 ABC  e.g. NA13 NRU, GX15 OGJ, MY51 VSU
 """
 
 import cv2
@@ -17,137 +13,93 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# ── lazy-load the OCR reader so startup isn't slow ─────────────────────────
-_reader = None
+_tesseract_ok = None
+
+def _check_tesseract():
+    global _tesseract_ok
+    if _tesseract_ok is None:
+        try:
+            import pytesseract
+            pytesseract.get_tesseract_version()
+            _tesseract_ok = True
+            logger.info("Tesseract OCR ready.")
+        except Exception as e:
+            logger.warning(f"Tesseract not available: {e}")
+            _tesseract_ok = False
+    return _tesseract_ok
 
 
-def _get_reader():
-    """Initialise EasyOCR once; reuse on every call."""
-    global _reader
-    if _reader is None:
-        import easyocr
-        logger.info("Loading EasyOCR model (first run takes ~30 s)…")
-        _reader = easyocr.Reader(["en"], gpu=False, verbose=False)
-        logger.info("EasyOCR ready.")
-    return _reader
-
-
-# ── main public function ─────────────────────────────────────────────────────
-
-def read_plate(frame, box, expand_ratio: float = 0.15) -> str | None:
+def read_plate(frame, box) -> str | None:
     """
-    Crop the lower half of a vehicle's bounding box (where plates usually
-    are), pre-process for better OCR accuracy, and return the plate text.
-
-    Parameters
-    ----------
-    frame       : BGR numpy array — the full video frame.
-    box         : (x, y, w, h) bounding box of the vehicle.
-    expand_ratio: how much to expand the crop on each side (default 15 %).
-
-    Returns
-    -------
-    Plate text as a cleaned string, or None if nothing legible was found.
+    Extract plate text from a vehicle bounding box in a video frame.
+    Returns e.g. 'NA13 NRU' or None if unreadable.
     """
     if frame is None or box is None:
         return None
+    if not _check_tesseract():
+        return None
+
+    import pytesseract
 
     x, y, w, h = box
     img_h, img_w = frame.shape[:2]
 
-    # ── 1. Focus on the bottom third of the vehicle (plates live there) ──
-    plate_y = y + int(h * 0.55)
-    plate_h = int(h * 0.45)
+    # ── Crop the bottom 30% of the vehicle — plate lives here ───────────
+    # Tuned on traffic.mp4: top_frac=0.70 gave best results
+    py1 = y + int(h * 0.70)
+    py2 = min(img_h, y + h)
+    x1  = max(0,     x)
+    x2  = min(img_w, x + w)
 
-    # ── 2. Expand the crop slightly so we don't clip the plate edges ──
-    pad_x = int(w * expand_ratio)
-    pad_y = int(plate_h * expand_ratio)
-
-    x1 = max(0,     x - pad_x)
-    y1 = max(0,     plate_y - pad_y)
-    x2 = min(img_w, x + w + pad_x)
-    y2 = min(img_h, plate_y + plate_h + pad_y)
-
-    crop = frame[y1:y2, x1:x2]
+    crop = frame[py1:py2, x1:x2]
     if crop.size == 0:
         return None
 
-    # ── 3. Pre-process for OCR ───────────────────────────────────────────
-    crop = _preprocess(crop)
+    processed = _preprocess(crop)
 
-    # ── 4. Run OCR ───────────────────────────────────────────────────────
+    whitelist = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 "
+    config    = f'--psm 11 --oem 3 -c tessedit_char_whitelist="{whitelist}"'
+
     try:
-        reader = _get_reader()
-        results = reader.readtext(crop, detail=1, paragraph=False)
+        import pytesseract
+        raw = pytesseract.image_to_string(processed, config=config)
     except Exception as e:
         logger.warning(f"OCR error: {e}")
         return None
 
-    # ── 5. Filter & clean ─────────────────────────────────────────────────
-    candidates = []
-    for (_, text, confidence) in results:
-        cleaned = _clean_plate_text(text)
-        if cleaned and confidence >= 0.35:
-            candidates.append((confidence, cleaned))
+    return _clean_plate_text(raw)
 
-    if not candidates:
-        return None
-
-    # Return the highest-confidence candidate
-    candidates.sort(reverse=True)
-    plate = candidates[0][1]
-    logger.info(f"Plate read: '{plate}' (conf {candidates[0][0]:.2f})")
-    return plate
-
-
-# ── helpers ──────────────────────────────────────────────────────────────────
 
 def _preprocess(crop: np.ndarray) -> np.ndarray:
-    """
-    Pipeline tuned for licence plate text:
-        resize → grayscale → bilateral filter → adaptive threshold
-    """
-    # Upscale small crops so OCR has enough pixels to work with
+    """4× upscale → grayscale → bilateral filter → Otsu threshold."""
     h, w = crop.shape[:2]
-    scale = max(1, int(200 / h))          # target at least 200 px tall
-    if scale > 1:
-        crop = cv2.resize(crop, (w * scale, h * scale),
-                          interpolation=cv2.INTER_CUBIC)
-
-    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-
-    # Bilateral filter keeps edges sharp while reducing noise
-    filtered = cv2.bilateralFilter(gray, d=11, sigmaColor=17, sigmaSpace=17)
-
-    # Adaptive threshold handles uneven lighting across the plate
-    thresh = cv2.adaptiveThreshold(
-        filtered, 255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY, 11, 2
-    )
-
-    # Back to BGR so EasyOCR is happy (it accepts both)
-    return cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
+    scale = max(2, int(100 / max(h, 1)))
+    big   = cv2.resize(crop, (w * scale, h * scale),
+                       interpolation=cv2.INTER_CUBIC)
+    gray  = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
+    bil   = cv2.bilateralFilter(gray, 11, 17, 17)
+    _, thresh = cv2.threshold(bil, 0, 255,
+                              cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return thresh
 
 
-# Common OCR mis-reads on number plates
-_SUBSTITUTIONS = {
-    "O": "0",   # letter O → zero  (context: digit position)
-    "I": "1",   # letter I → one
-    "S": "5",   # S looks like 5
-    "B": "8",   # B looks like 8
-    "Z": "2",   # Z looks like 2
-}
+# OCR character confusion pairs for the Charles Wright plate font
+_LETTER_TO_DIGIT = {"O": "0", "I": "1", "Z": "2", "S": "5",
+                    "B": "8", "G": "6", "T": "7"}
+_DIGIT_TO_LETTER = {v: k for k, v in _LETTER_TO_DIGIT.items()}
 
-# Kenyan plates: KAA 123A / KBB 456Z / KCD 789B (adapt as needed)
-_PLATE_PATTERN = re.compile(
+_PLATE_RE = re.compile(
     r"""
     (?:
-        [A-Z]{1,3}\s*\d{1,4}\s*[A-Z]{0,2}   # e.g. KAA 123A
+        [A-Z]{2}\d{2}\s?[A-Z]{3}      # Current:  AB12 ABC  ← most common
         |
-        \d{1,4}\s*[A-Z]{1,3}\s*\d{0,4}       # e.g. 123 KAA
+        [A-Z]\d{1,3}\s?[A-Z]{3}       # Prefix:   A123 ABC
         |
-        [A-Z0-9]{4,10}                        # fall-back: 4-10 alphanumerics
+        [A-Z]{3}\s?\d{1,3}\s?[A-Z]    # Suffix:   ABC 123A
+        |
+        [A-Z]{1,3}\s?\d{1,4}          # Dateless: ABC 123
+        |
+        \d{1,4}\s?[A-Z]{1,3}          # Dateless: 1234 AB
     )
     """,
     re.VERBOSE,
@@ -155,25 +107,40 @@ _PLATE_PATTERN = re.compile(
 
 
 def _clean_plate_text(raw: str) -> str | None:
-    """
-    Strip noise characters, apply common OCR corrections, and validate
-    against a loose plate pattern.
-    """
-    # Remove characters that never appear on plates
-    cleaned = re.sub(r"[^A-Z0-9\s]", "", raw.upper()).strip()
+    text = re.sub(r"[^A-Z0-9\s]", "", raw.upper())
+    text = re.sub(r"\s+", " ", text).strip()
 
-    # Compact multiple spaces
-    cleaned = re.sub(r"\s+", " ", cleaned)
-
-    if len(cleaned) < 4:
+    if len(text) < 4:
         return None
 
-    match = _PLATE_PATTERN.search(cleaned)
-    if not match:
-        return None
+    # ── Scan all 7-char windows in the OCR output ────────────────────────
+    compact = text.replace(" ", "")
+    for start in range(max(1, len(compact) - 6)):
+        window = compact[start:start + 7]
+        if len(window) < 7:
+            break
+        c = list(window)
+        # Positional correction: UK AB12 ABC format
+        # pos 0,1 → letters;  pos 2,3 → digits;  pos 4,5,6 → letters
+        for i in (0, 1, 4, 5, 6):   # must be letters
+            c[i] = _DIGIT_TO_LETTER.get(c[i], c[i])
+        for i in (2, 3):             # must be digits
+            c[i] = _LETTER_TO_DIGIT.get(c[i], c[i])
+        # Validate
+        if (c[0].isalpha() and c[1].isalpha()
+                and c[2].isdigit() and c[3].isdigit()
+                and c[4].isalpha() and c[5].isalpha() and c[6].isalpha()):
+            plate = "".join(c[:4]) + " " + "".join(c[4:])
+            logger.info(f"Plate read: {plate}")
+            return plate
 
-    result = match.group(0).strip()
-    # Reject if it's all letters with no digits (probably not a plate)
-    if result.isalpha() and len(result) <= 5:
-        return None
-    return result
+    # ── Fall back: pattern match ─────────────────────────────────────────
+    for line in text.split("\n"):
+        m = _PLATE_RE.search(line.strip())
+        if m:
+            result = m.group(0).strip()
+            if not result.isalpha():
+                logger.info(f"Plate read (pattern): {result}")
+                return result
+
+    return None
